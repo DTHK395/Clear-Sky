@@ -7,9 +7,8 @@ from datetime import datetime
 try:
     import ssl
     has_ssl = True
-except Exception as e:
+except Exception:
     has_ssl=False
-    ssl_error=str(e)
 
 from kivy.app import App
 from kivy.core.window import Window
@@ -192,7 +191,7 @@ class WeatherApp(App):
 
     def get_weather(self, lat, lon):
         if not has_ssl:
-            raise Exception(f"Модуль SSL отсутсвует: {ssl_error}")
+            raise Exception("No SSL")
         url = (
             f"https://api.open-meteo.com/v1/forecast?"
             f"latitude={lat}&longitude={lon}&"
@@ -332,8 +331,8 @@ class WeatherApp(App):
         try:
             weather_data = WeatherApp.get_weather(self, lat, lon)
             Clock.schedule_once(lambda dt: self.update_ui(weather_data))
-        except Exception as e:
-            err_msg = str(e)
+        except Exception:
+            err_msg = "Нет соединения\n(возможно код корявый ¯\\_(ツ)_/¯)"
             Clock.schedule_once(lambda dt: self.show_error(err_msg))
 
     def create_hour_card(self, time_str, temp, code, is_day):
