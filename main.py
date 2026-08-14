@@ -283,7 +283,9 @@ class WeatherApp(App):
         try:
             gps.configure(on_location=self.geolocations, on_status=self.on_gps_status)
             gps.start(1000,0)
-            self.gps_timer=Clock.schedule_once(self.gps_timeout, 15)
+            self.status_label.text="Поиск спутников GPS... \n(в помещении данный процесс может затянуться)"
+            self.status_label.font_size="14sp"
+            self.gps_timer=Clock.schedule_once(self.gps_timeout, 30)
         except Exception as e:
             self.status_label.text="GPS данные не получены"
             self.weather_canvas.stop_loader()
