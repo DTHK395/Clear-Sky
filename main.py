@@ -1,7 +1,15 @@
 import math
-import requests
+import urllib.request
+import json
 import threading
+import traceback
 from datetime import datetime
+try:
+    import ssl
+    has_ssl = True
+except Exception as e:
+    has_ssl=False
+    ssl_error=str(e)
 
 from kivy.app import App
 from kivy.core.window import Window
@@ -16,13 +24,17 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
 from kivy.uix.image import Image
 from kivy.metrics import dp
+from kivy.utils import platform
+from plyer import gps
 
 Window.clearcolor = (1,1,1,1)
 
 Cities = {
     "Екатеринбург": {"lat":56.84, "lon": 60.61},
     "Сысерть": {"lat":56.50, "lon":60.81},
-    "Киров": {"lat":58.60, "lon": 49.66}
+    "Киров": {"lat":58.60, "lon": 49.66},
+    "посёлок Чамзинка": {"lat":54.40, "lon":45.78},
+    "Южноуральск": {"lat":54.44,"lon":61.26}
 
 }
 
@@ -44,6 +56,8 @@ class WeatherCanvas(Widget):
             self.draw_cloud()
         elif self.current_weather == "rain":
             self.draw_rain()
+        elif self.current_weather == "moon":
+            self.draw_moon()
 
     def draw_sun_loader(self, rotating=False):
         self.current_weather = 'loader' if rotating else "sun"
@@ -96,6 +110,17 @@ class WeatherCanvas(Widget):
         self.angle = (self.angle + 3) % 360
         self.draw_sun_loader()
 
+    def draw_moon(self):
+        self.current_weather='moon'
+        self.canvas.clear()
+        cx,cy= self.center_x, self.center_y
+        r_moon = dp(70)
+        with self.canvas:
+            Color(0.9,0.9,0.6)
+            Ellipse(pos=(cx-r_moon,cy - r_moon), size=(r_moon*2,r_moon*2))
+            Color(1,1,1)
+            Ellipse(pos=(cx-r_moon+dp(15),cy-r_moon+dp(10)), size=(r_moon*2,r_moon*2))
+
     def draw_rain(self):
         self.current_weather= 'rain'
         self.draw_cloud()
@@ -107,7 +132,7 @@ class WeatherCanvas(Widget):
             Line(points=[cx + dp(45), cy - dp(50), cx + dp(30), cy - dp(95)], width=dp(6), cap='round')
             Line(points=[cx + dp(105), cy - dp(50), cx + dp(90), cy - dp(95)], width=dp(6), cap='round')
 
-def draw_storm(self):
+    def draw_storm(self):
         self.current_weather = 'storm'
         self.draw_rain()
         cx,cy= self.center_x, self.center_y
@@ -117,12 +142,21 @@ def draw_storm(self):
 
 
 class WeatherApp(App):
+    def on_start(self):
+        try:
+            if platform=="android":
+                from android.permissions import request_permissions, Permission
+                request_permissions([Permission.ACCESS_FINE_LOCATION, Permission.ACCESS_COARSE_LOCATION])
+        except Exception as e:
+            self.status_label.text=f"Ошибка разрешений: {e}"
+            self.status_label.font_size = "12sp"
+
     def build(self):
         main_layout = BoxLayout(orientation='vertical', padding=50,spacing=20)
 
         self.city_spinner = Spinner(
             text="Екатеринбург",
-            values=list(Cities.keys()),
+            values=["Моё местоположение"] + list(Cities.keys()),
             size_hint=(1,None),
             height="45dp"
         )
@@ -137,8 +171,10 @@ class WeatherApp(App):
             color=(0.2,0.2,0.2,1),
             font_size="22sp",
             size_hint=(1, 0.15),
-            halign="center"
+            halign="center",
+            valign="middle"
         )
+        self.status_label.bind(size=lambda instance, size: setattr(instance, "text_size", (size[0],None)))
         main_layout.add_widget(self.status_label)
         scroll_view = ScrollView(
             size_hint=(1,0.3),
@@ -155,23 +191,28 @@ class WeatherApp(App):
 
 
     def get_weather(self, lat, lon):
+        if not has_ssl:
+            raise Exception(f"Модуль SSL отсутсвует: {ssl_error}")
         url = (
             f"https://api.open-meteo.com/v1/forecast?"
             f"latitude={lat}&longitude={lon}&"
-            f"current=temperature_2m,weather_code&"
-            f"hourly=temperature_2m,weather_code&"
+            f"current=temperature_2m,weather_code,is_day&"
+            f"hourly=temperature_2m,weather_code,is_day&"
             f"forecast_days=2&"
             f"timezone=auto"
         )
-        responce = requests.get(url)
-        data = responce.json()
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(url, context=ctx) as response:
+            data = json.loads(response.read().decode('utf-8'))
 
         current_temp = data["current"]["temperature_2m"]
         current_code = data["current"]["weather_code"]
+        current_is_day= data["current"]["is_day"]
 
         times = data["hourly"]["time"]
         temps = data["hourly"]["temperature_2m"]
         codes= data["hourly"]["weather_code"]
+        is_day= data["hourly"]["is_day"]
 
         now_str = datetime.now().strftime("%Y-%m-%dT%H:00")
         start_index = 0
@@ -185,29 +226,37 @@ class WeatherApp(App):
             hourly_24.append({
                 "time": hour_label,
                 "temp": round(temps[i]),
-                "code":codes[i]
+                "code":codes[i],
+                "is_day":is_day[i]
             })
         return{
             "current_temp": current_temp,
             "current_code": current_code,
-            "hourly": hourly_24
+            "hourly": hourly_24,
+            "current_is_day": current_is_day
         }
 
     def update_ui(self, data):
         self.weather_canvas.stop_loader()
+        self.status_label.font_size="22sp"
 
         temp = data["current_temp"]
         code = data["current_code"]
+        is_day = data["current_is_day"]
         if code in [0,1]:
-            self.weather_canvas.draw_sun_loader(rotating=False)
-            weather_text="Солнечно"
+            if is_day==1:
+                self.weather_canvas.draw_sun_loader(rotating=False)
+                weather_text="Солнечно"
+            else:
+                self.weather_canvas.draw_moon()
+                weather_text="Безоблачная ночь"
 
         elif code in [2,3,45,48]:
             self.weather_canvas.draw_cloud()
             weather_text="Облачно"
 
         elif code in [95,96,99]:
-            self.draw_storm()
+            self.weather_canvas.draw_storm()
             weather_text="Гроза"
 
         else:
@@ -218,14 +267,61 @@ class WeatherApp(App):
 
         self.hourly_layout.clear_widgets()
         for item in data["hourly"]:
-            card = self.create_hour_card(item["time"], item["temp"], item["code"])
+            card = self.create_hour_card(item["time"], item["temp"], item["code"], item["is_day"])
             self.hourly_layout.add_widget(card)
 
     def on_city_changed(self, spinner, text):
         self.weather_canvas.start_loader()
-        self.status_label.text="Загрузка..."
         self.hourly_layout.clear_widgets()
-        self.load_weather_data()
+        if text == "Моё местоположение":
+            self.status_label.text = "Поиск по GPS..."
+            self.get_geolocations()
+        else:
+            self.status_label.text = "Загрузка..."
+            self.load_weather_data()
+
+    def get_geolocations(self):
+        try:
+            gps.configure(on_location=self.geolocations, on_status=self.on_gps_status)
+            gps.start(1000,0)
+            self.gps_timer=Clock.schedule_once(self.gps_timeout, 15)
+        except Exception as e:
+            self.status_label.text="GPS данные не получены"
+            self.weather_canvas.stop_loader()
+
+    def on_gps_status(self, general_status, status_message):
+        if general_status=='provider-disabled':
+            if hasattr(self, "gps_timer"):
+                Clock.unschedule(self.gps_timer)
+            try:
+                gps.stop()
+            except:
+                pass
+            Clock.schedule_once(lambda dt: self.show_error("Включите геолокацию в шторке телефона"))
+
+    def geolocations(self,**kwargs):
+        if hasattr(self,"gps_timer"):
+            Clock.unschedule(self.gps_timer)
+        try:
+            gps.stop()
+        except:
+            pass
+
+        lat=kwargs.get("lat")
+        lon=kwargs.get("lon")
+
+        if lat and lon:
+            threading.Thread(target=self.fetch_in_background, args=(lat,lon), daemon=True).start()
+        else:
+            Clock.schedule_once(lambda dt: self.show_error("GPS вернул пустые координаты"))
+
+
+    def gps_timeout(self, dt):
+        try:
+            gps.stop()
+        except:
+            pass
+        self.show_error("Не удалось получить данные GPS(попробуйте подойти к окну или выйти на балкон)")
 
     def load_weather_data(self):
         selected_city = self.city_spinner.text
@@ -237,10 +333,10 @@ class WeatherApp(App):
             weather_data = WeatherApp.get_weather(self, lat, lon)
             Clock.schedule_once(lambda dt: self.update_ui(weather_data))
         except Exception as e:
-            print("Ошибка загрузки", e)
-            Clock.schedule_once(lambda dt: self.show_error())
+            err_msg = str(e)
+            Clock.schedule_once(lambda dt: self.show_error(err_msg))
 
-    def create_hour_card(self, time_str, temp, code):
+    def create_hour_card(self, time_str, temp, code, is_day):
         card = BoxLayout(
             orientation = 'vertical',
             size_hint=(None, 1),
@@ -248,7 +344,7 @@ class WeatherApp(App):
             padding = 5,
             spacing=2
         )
-        icon_file = "sun.png" if code in [0, 1] else ("cloud.png" if code in [2,3,45,48] else("groza.png" if code in [95,96,99] else "rain.png"))
+        icon_file = ("sun.png" if is_day==1 else "moon.png") if code in [0, 1] else ("cloud.png" if code in [2,3,45,48] else("groza.png" if code in [95,96,99] else "rain.png"))
         lbl_time = Label(text=time_str, font_size="12sp", color=(0.4,0.4,0.4,1))
         img_icon=Image(source=icon_file,size_hint=(1,1))
         lbl_temp = Label(text=f"{temp}°C", font_size="14sp", bold=True, color=(0.2,0.2,0.2,1))
@@ -259,8 +355,9 @@ class WeatherApp(App):
 
         return card
 
-    def show_error(self):
+    def show_error(self, error_text="Неизвестная ошибка"):
         self.weather_canvas.stop_loader()
-        self.status_label.text =  "Нет соединения(возможно код корявый¯\_(ツ)_/¯"
+        self.status_label.font_size = "12sp"
+        self.status_label.text =  f"Ошибка: {error_text}"
 if __name__ == '__main__':
     WeatherApp().run()
