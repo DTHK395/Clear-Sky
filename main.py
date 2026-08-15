@@ -280,6 +280,28 @@ class WeatherApp(App):
             self.load_weather_data()
 
     def get_geolocations(self):
+        self.status_label.text="Быстрый поиск геолокации...(по IP)"
+        threading.Thread(target=self.IP_geolocation, daemon=True).start()
+
+    def IP_geolocation(self):
+        try:
+            url="https://ipwho.is/"
+            ctx=ssl._create_unverified_context()
+            with urllib.request.urlopen(url,context=ctx,timeout=5) as responce:
+                data=json.loads(responce.read().decode('utf-8'))
+
+            if data.get("success"):
+                lat=data["latitude"]
+                lon=data["longitude"]
+                weather_data=self.get_weather(lat, lon)
+                Clock.schedule_once(lambda dt:self.update_ui(weather_data))
+                return
+        except Exception:
+            pass
+
+        Clock.schedule_once(lambda dt: self.gps_geolocation())
+
+    def gps_geolocation(self):
         try:
             gps.configure(on_location=self.geolocations, on_status=self.on_gps_status)
             gps.start(1000,0)
