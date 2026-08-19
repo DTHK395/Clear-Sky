@@ -3,6 +3,7 @@ import urllib.request
 import json
 import threading
 import traceback
+import os
 from datetime import datetime
 try:
     import ssl
@@ -15,9 +16,9 @@ from kivy.core.window import Window
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, Ellipse, Line
+from kivy.graphics import Color, Ellipse, Line, RoundedRectangle
 from kivy.clock import Clock
-from kivy.uix.spinner import Spinner
+from kivy.uix.spinner import Spinner, SpinnerOption
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 from kivy.uix.button import Button
@@ -139,8 +140,108 @@ class WeatherCanvas(Widget):
             Color(1, 0.8, 0)
             Line(points=[cx+dp(15),cy-dp(30),cx-dp(15),cy-dp(75),cx+dp(25),cy-dp(75),cx-dp(5),cy-dp(125)], width=dp(4), cap='square', joint='miter')
 
+BURGUNDY_COLOR=(0.45, 0.05, 0.15, 1)
+
+class RoundedButton(Button):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.background_normal = ''
+        self.background_down = ''
+        self.background_color = (0,0,0,0)
+        self.color= (0.2,0.2,0.2,1)
+
+        with self.canvas.before:
+            self.bg_color= Color(1,1,1,1)
+            self.bg_rect = RoundedRectangle(radius=[dp(15)])
+            self.border_color = Color(*BURGUNDY_COLOR)
+            self.border_line=Line(width=dp(1.5))
+
+        self.bind(pos=self.update_canvas, size=self.update_canvas, state=self.on_state)
+
+    def update_canvas(self, *args):
+        pad=dp(2)
+        self.bg_rect.pos=(self.x + pad, self.y+pad)
+        self.bg_rect.size=(self.width - pad*2, self.height - pad*2)
+        self.border_line.rounded_rectangle=(self.x+pad,self.y+pad,self.width-pad*2,self.height-pad*2, dp(15))
+
+    def on_state(self, instance, value):
+        self.bg_color.rgba=(0.9,0.9,0.9,1) if value == 'down' else (1,1,1,1)
+
+class RoundedSpinnerOption(SpinnerOption):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.background_normal=''
+        self.background_down=''
+        self.background_color = (0,0,0,0)
+        self.color= (0.2,0.2,0.2,1)
+        with self.canvas.before:
+            self.bg_color= Color(1,1,1,1)
+            self.bg_rect = RoundedRectangle(radius=[dp(10)])
+            self.border_color = Color(*BURGUNDY_COLOR)
+            self.border_line=Line(width=dp(1.2))
+
+        self.bind(pos=self.update_canvas, size=self.update_canvas, state=self.on_state)
+
+    def update_canvas(self, *args):
+        pad=dp(2)
+        self.bg_rect.pos=(self.x + pad, self.y+pad)
+        self.bg_rect.size=(self.width - pad*2, self.height - pad*2)
+        self.border_line.rounded_rectangle=(self.x+pad,self.y+pad,self.width-pad*2,self.height-pad*2, dp(10))
+
+    def on_state(self, instance, value):
+        self.bg_color.rgba=(0.9,0.9,0.9,1) if value == 'down' else (1,1,1,1)
+
+class RoundedSpinner(Spinner):
+    def __init__(self, **kwargs):
+        kwargs['option_cls']=RoundedSpinnerOption
+        super().__init__(**kwargs)
+        self.background_normal=''
+        self.background_down=''
+        self.background_color = (0,0,0,0)
+        self.color= (0.2,0.2,0.2,1)
+        with self.canvas.before:
+            self.bg_color= Color(1,1,1,1)
+            self.bg_rect = RoundedRectangle(radius=[dp(15)])
+            self.border_color = Color(*BURGUNDY_COLOR)
+            self.border_line=Line(width=dp(1.5))
+
+        self.bind(pos=self.update_canvas, size=self.update_canvas, state=self.on_state)
+
+    def update_canvas(self, *args):
+        pad=dp(2)
+        self.bg_rect.pos=(self.x + pad, self.y+pad)
+        self.bg_rect.size=(self.width - pad*2, self.height - pad*2)
+        self.border_line.rounded_rectangle=(self.x+pad,self.y+pad,self.width-pad*2,self.height-pad*2, dp(15))
+
+    def on_state(self, instance, value):
+        self.bg_color.rgba = (0.9, 0.9, 0.9, 1) if value == 'down' else (1, 1, 1, 1)
 
 class WeatherApp(App):
+    def get_settings_path(self):
+        return os.path.join(self.user_data_dir, "settings.json")
+
+    def save_last_city(self,city):
+        try:
+            with open(self.get_settings_path(), "w", encoding='utf-8')as f:
+                json.dump({"last_city":city}, f)
+        except Exception:
+            pass
+        return "Екатеринбург"
+
+    def load_last_city(self):
+        try:
+            if os.path.exists(self.get_settings_path()):
+                with open(self.get_settings_path(), 'r', encoding="utf-8") as f:
+                    data = json.load(f)
+                    saved_city= data.get("last_city", "Екатеринбург")
+
+                    if saved_city not in Cities and saved_city != "Моё местоположение":
+                        return "Екатеринбург"
+                    return saved_city
+        except Exception:
+            pass
+        return "Екатеринбург"
+
     def on_start(self):
         try:
             if platform=="android":
@@ -153,8 +254,9 @@ class WeatherApp(App):
     def build(self):
         main_layout = BoxLayout(orientation='vertical', padding=50,spacing=20)
 
-        self.city_spinner = Spinner(
-            text="Екатеринбург",
+        last_city=self.load_last_city()
+        self.city_spinner = RoundedSpinner(
+            text=last_city,
             values=["Моё местоположение"] + list(Cities.keys()),
             size_hint=(1,None),
             height="45dp"
@@ -175,6 +277,10 @@ class WeatherApp(App):
         )
         self.status_label.bind(size=lambda instance, size: setattr(instance, "text_size", (size[0],None)))
         main_layout.add_widget(self.status_label)
+
+        self.gps_btn=RoundedButton(text="Поиск по GPS", markup=True, background_color=(0,0,0,0), color=(0.2,0.2,0.2,1),font_size='14sp',size_hint=(1,None),height='0dp',opacity=0,disabled=True)
+        self.gps_btn.bind(on_release=lambda x: self.gps_geolocation())
+        main_layout.add_widget(self.gps_btn)
         scroll_view = ScrollView(
             size_hint=(1,0.3),
             do_scroll_x=True,
@@ -185,7 +291,7 @@ class WeatherApp(App):
         scroll_view.add_widget(self.hourly_layout)
         main_layout.add_widget(scroll_view)
 
-        self.load_weather_data()
+        self.on_city_changed(self.city_spinner,last_city)
         return main_layout
 
 
@@ -201,7 +307,8 @@ class WeatherApp(App):
             f"timezone=auto"
         )
         ctx = ssl._create_unverified_context()
-        with urllib.request.urlopen(url, context=ctx) as response:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        with urllib.request.urlopen(req, context=ctx) as response:
             data = json.loads(response.read().decode('utf-8'))
 
         current_temp = data["current"]["temperature_2m"]
@@ -270,12 +377,21 @@ class WeatherApp(App):
             self.hourly_layout.add_widget(card)
 
     def on_city_changed(self, spinner, text):
+        self.save_last_city(text)
         self.weather_canvas.start_loader()
         self.hourly_layout.clear_widgets()
         if text == "Моё местоположение":
-            self.status_label.text = "Поиск по GPS..."
-            self.get_geolocations()
+            self.gps_btn.height="45dp"
+            self.gps_btn.opacity=1
+            self.gps_btn.disabled = False
+
+            self.status_label.text = "Быстрый поиск(по IP)..."
+            threading.Thread(target=self.IP_geolocation, daemon=True).start()
         else:
+            self.gps_btn.height="0dp"
+            self.gps_btn.opacity=0
+            self.gps_btn.disabled = True
+
             self.status_label.text = "Загрузка..."
             self.load_weather_data()
 
@@ -284,10 +400,12 @@ class WeatherApp(App):
         threading.Thread(target=self.IP_geolocation, daemon=True).start()
 
     def IP_geolocation(self):
+        ctx =ssl._create_unverified_context()
+        headers={"User-Agent": 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
         try:
-            url="https://ipwho.is/"
-            ctx=ssl._create_unverified_context()
-            with urllib.request.urlopen(url,context=ctx,timeout=5) as responce:
+            req=urllib.request.Request("https://ipwho.is/",headers=headers)
+            with urllib.request.urlopen(req,context=ctx,timeout=5) as responce:
                 data=json.loads(responce.read().decode('utf-8'))
 
             if data.get("success"):
@@ -295,6 +413,20 @@ class WeatherApp(App):
                 lon=data["longitude"]
                 weather_data=self.get_weather(lat, lon)
                 Clock.schedule_once(lambda dt:self.update_ui(weather_data))
+                return
+        except Exception:
+            pass
+
+        try:
+            req = urllib.request.Request("http://ip-api.com/json/", headers=headers)
+            with urllib.request.urlopen(req, context=ctx, timeout=5) as responce:
+                data = json.loads(responce.read().decode('utf-8'))
+
+            if data.get("status") == "success":
+                lat = data["lat"]
+                lon = data["lon"]
+                weather_data = self.get_weather(lat, lon)
+                Clock.schedule_once(lambda dt: self.update_ui(weather_data))
                 return
         except Exception:
             pass
@@ -347,6 +479,11 @@ class WeatherApp(App):
         self.show_error("Не удалось получить данные GPS(попробуйте подойти к окну или выйти на балкон)")
 
     def load_weather_data(self):
+        selected_city=self.city_spinner.text
+
+        if selected_city not in Cities:
+            selected_city="Екатеринбург"
+            self.city_spinner.text=selected_city
         selected_city = self.city_spinner.text
         coords = Cities[selected_city]
         threading.Thread(target=self.fetch_in_background, args=(coords["lat"], coords["lon"]), daemon = True).start()
@@ -356,7 +493,7 @@ class WeatherApp(App):
             weather_data = WeatherApp.get_weather(self, lat, lon)
             Clock.schedule_once(lambda dt: self.update_ui(weather_data))
         except Exception:
-            err_msg = "Нет соединения\n(возможно код корявый ¯\\_(ツ)_/¯)"
+            err_msg = "Нет соединения\n(возможно код корявый ¯\(o_o)/¯)"
             Clock.schedule_once(lambda dt: self.show_error(err_msg))
 
     def create_hour_card(self, time_str, temp, code, is_day):
